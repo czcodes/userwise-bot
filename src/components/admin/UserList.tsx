@@ -115,7 +115,7 @@ export function UserList() {
                 </Badge>
               </TableCell>
               <TableCell>
-                <Badge variant={user.status === "Active" ? "success" : "outline"}>
+                <Badge variant={user.status === "Active" ? "default" : "outline"}>
                   {user.status}
                 </Badge>
               </TableCell>
