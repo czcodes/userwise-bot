@@ -3,58 +3,58 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { useState } from "react";
-import { Pencil, Trash2, Check, X } from "lucide-react";
-
-// Mock data for users
-const mockUsers = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john@example.com",
-    role: "Admin",
-    status: "Active",
-    lastActive: "2023-07-15T14:30:00",
-  },
-  {
-    id: "2",
-    name: "Jane Smith",
-    email: "jane@example.com",
-    role: "User",
-    status: "Active",
-    lastActive: "2023-07-15T10:15:00",
-  },
-  {
-    id: "3",
-    name: "Robert Johnson",
-    email: "robert@example.com",
-    role: "User",
-    status: "Inactive",
-    lastActive: "2023-07-10T09:45:00",
-  },
-  {
-    id: "4",
-    name: "Sarah Williams",
-    email: "sarah@example.com",
-    role: "User",
-    status: "Active",
-    lastActive: "2023-07-14T16:20:00",
-  },
-  {
-    id: "5",
-    name: "Michael Brown",
-    email: "michael@example.com",
-    role: "User",
-    status: "Active",
-    lastActive: "2023-07-15T11:05:00",
-  },
-];
-
-type User = typeof mockUsers[0];
+import { useState, useEffect } from "react";
+import { Pencil, Trash2, Check, X, Loader2 } from "lucide-react";
+import { fetchUsers, deleteUser, toggleUserStatus, User } from "@/services/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function UserList() {
-  const [users, setUsers] = useState<User[]>(mockUsers);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  
+  // Fetch users using React Query
+  const { data: users = [], isLoading, error } = useQuery({
+    queryKey: ['users'],
+    queryFn: fetchUsers,
+  });
+
+  // Delete user mutation
+  const deleteMutation = useMutation({
+    mutationFn: deleteUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: "User Deleted",
+        description: "The user has been deleted successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete user. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
+
+  // Toggle user status mutation
+  const toggleStatusMutation = useMutation({
+    mutationFn: toggleUserStatus,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: "Status Updated",
+        description: "The user status has been updated successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update user status. Please try again.",
+        variant: "destructive",
+      });
+    }
+  });
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -62,28 +62,29 @@ export function UserList() {
   };
 
   const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((user) => user.id !== userId));
-    toast({
-      title: "User Deleted",
-      description: "The user has been deleted successfully.",
-    });
+    deleteMutation.mutate(userId);
   };
 
   const handleToggleStatus = (userId: string) => {
-    setUsers(
-      users.map((user) => {
-        if (user.id === userId) {
-          const newStatus = user.status === "Active" ? "Inactive" : "Active";
-          return { ...user, status: newStatus };
-        }
-        return user;
-      })
-    );
-    toast({
-      title: "Status Updated",
-      description: "The user status has been updated successfully.",
-    });
+    toggleStatusMutation.mutate(userId);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2">Loading users...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 border border-destructive rounded bg-destructive/10 text-destructive">
+        <p>Error loading users. Please try again later.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -127,6 +128,7 @@ export function UserList() {
                     size="icon"
                     onClick={() => handleToggleStatus(user.id)}
                     title={user.status === "Active" ? "Deactivate" : "Activate"}
+                    disabled={toggleStatusMutation.isPending}
                   >
                     {user.status === "Active" ? (
                       <X className="h-4 w-4" />
@@ -146,6 +148,7 @@ export function UserList() {
                     size="icon"
                     onClick={() => handleDeleteUser(user.id)}
                     title="Delete"
+                    disabled={deleteMutation.isPending}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
