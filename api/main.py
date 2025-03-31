@@ -1,11 +1,21 @@
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field, EmailStr
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
+from jose import JWTError, jwt
 import uuid
+import json
 
+# Security configuration
+SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"  # Change in production
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# Initialize FastAPI app
 app = FastAPI(title="DevOps Bot API")
 
 # Enable CORS
@@ -17,7 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 # Models
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user_id: str
+    name: str
+    email: str
+    role: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
 class UserBase(BaseModel):
     name: str
     email: str
@@ -25,14 +50,42 @@ class UserBase(BaseModel):
     status: str
 
 class UserCreate(UserBase):
-    pass
+    password: str
 
 class User(UserBase):
     id: str
     lastActive: str
     
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+class UserInDB(User):
+    hashed_password: str
+
+# Chat models
+class Message(BaseModel):
+    id: str
+    user_id: str
+    content: str
+    timestamp: str
+    type: str = "user"  # "user" or "bot"
+
+class ChatSession(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    messages: List[Message] = []
+
+# Credential models
+class Credential(BaseModel):
+    id: str
+    user_id: str
+    service: str
+    details: Dict[str, Any]
+    created_at: str
+    updated_at: str
 
 # Mock database
 mock_users = [
@@ -43,6 +96,7 @@ mock_users = [
         "role": "Admin",
         "status": "Active",
         "lastActive": "2023-07-15T14:30:00",
+        "hashed_password": pwd_context.hash("password123")
     },
     {
         "id": "2",
@@ -51,6 +105,7 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-15T10:15:00",
+        "hashed_password": pwd_context.hash("password456")
     },
     {
         "id": "3",
@@ -59,6 +114,7 @@ mock_users = [
         "role": "User",
         "status": "Inactive",
         "lastActive": "2023-07-10T09:45:00",
+        "hashed_password": pwd_context.hash("password789")
     },
     {
         "id": "4",
@@ -67,6 +123,7 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-14T16:20:00",
+        "hashed_password": pwd_context.hash("passwordabc")
     },
     {
         "id": "5",
@@ -75,47 +132,404 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-15T11:05:00",
+        "hashed_password": pwd_context.hash("passworddef")
     },
 ]
+
+# Mock chat sessions
+mock_chat_sessions = [
+    {
+        "id": "1",
+        "user_id": "1",
+        "title": "Kubernetes Deployment Help",
+        "created_at": "2023-07-15T14:30:00",
+        "updated_at": "2023-07-15T15:00:00",
+        "messages": [
+            {
+                "id": "101",
+                "user_id": "1",
+                "content": "How do I deploy a new container to Kubernetes?",
+                "timestamp": "2023-07-15T14:30:00",
+                "type": "user"
+            },
+            {
+                "id": "102",
+                "user_id": "system",
+                "content": "To deploy a container to Kubernetes, you'll need to create a deployment YAML file first. Would you like me to show you an example?",
+                "timestamp": "2023-07-15T14:31:00",
+                "type": "bot"
+            }
+        ]
+    },
+    {
+        "id": "2",
+        "user_id": "2",
+        "title": "MongoDB Connection Issues",
+        "created_at": "2023-07-14T10:15:00",
+        "updated_at": "2023-07-14T10:45:00",
+        "messages": [
+            {
+                "id": "201",
+                "user_id": "2",
+                "content": "I'm having trouble connecting to my MongoDB cluster.",
+                "timestamp": "2023-07-14T10:15:00",
+                "type": "user"
+            },
+            {
+                "id": "202",
+                "user_id": "system",
+                "content": "Let's troubleshoot your MongoDB connection. Can you share the connection string you're using (without passwords)?",
+                "timestamp": "2023-07-14T10:16:00",
+                "type": "bot"
+            }
+        ]
+    }
+]
+
+# Mock credentials
+mock_credentials = [
+    {
+        "id": "1",
+        "user_id": "1",
+        "service": "airflow",
+        "details": {
+            "url": "https://airflow.example.com",
+            "username": "admin"
+        },
+        "created_at": "2023-07-10T09:00:00",
+        "updated_at": "2023-07-10T09:00:00"
+    },
+    {
+        "id": "2",
+        "user_id": "1",
+        "service": "mongodb",
+        "details": {
+            "uri": "mongodb://localhost:27017",
+            "username": "admin"
+        },
+        "created_at": "2023-07-10T09:15:00",
+        "updated_at": "2023-07-10T09:15:00"
+    }
+]
+
+# Analytics data for admin dashboard
+mock_analytics = {
+    "daily_sessions": [
+        {"day": "Mon", "count": 24},
+        {"day": "Tue", "count": 18},
+        {"day": "Wed", "count": 30},
+        {"day": "Thu", "count": 26},
+        {"day": "Fri", "count": 32},
+        {"day": "Sat", "count": 15},
+        {"day": "Sun", "count": 10}
+    ],
+    "user_activity": {
+        "active_users": 42,
+        "total_messages": 256,
+        "average_session_duration": "12m 30s"
+    },
+    "system_metrics": {
+        "cpu_usage": 42,
+        "memory_usage": 65,
+        "storage_usage": 37,
+        "network_bandwidth": 28
+    }
+}
+
+# Security helper functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def get_user(email: str):
+    for user in mock_users:
+        if user["email"] == email:
+            return user
+    return None
+
+def authenticate_user(email: str, password: str):
+    user = get_user(email)
+    if not user:
+        return False
+    if not verify_password(password, user["hashed_password"]):
+        return False
+    return user
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(token_data.username)
+    if user is None:
+        raise credentials_exception
+    # Update lastActive timestamp
+    user["lastActive"] = datetime.now().isoformat()
+    return user
+
+async def get_current_active_user(current_user: dict = Depends(get_current_user)):
+    if current_user["status"] == "Inactive":
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
 
 # API Routes
 @app.get("/")
 def read_root():
     return {"message": "Welcome to DevOps Bot API"}
 
-@app.get("/users", response_model=List[User])
-def get_users():
-    return mock_users
+# Authentication routes
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["email"]}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"]
+    }
 
-@app.get("/users/{user_id}", response_model=User)
-def get_user(user_id: str):
-    for user in mock_users:
-        if user["id"] == user_id:
-            return user
-    raise HTTPException(status_code=404, detail="User not found")
-
-@app.post("/users", response_model=User, status_code=status.HTTP_201_CREATED)
-def create_user(user: UserCreate):
+@app.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
+async def register_user(user: UserCreate):
+    # Check if email already exists
+    if get_user(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
     new_user = user.dict()
     new_user["id"] = str(uuid.uuid4())
     new_user["lastActive"] = datetime.now().isoformat()
+    new_user["hashed_password"] = get_password_hash(user.password)
+    del new_user["password"]  # Remove plain password
+    
     mock_users.append(new_user)
-    return new_user
+    
+    # Return user without hashed_password
+    user_response = {k: v for k, v in new_user.items() if k != "hashed_password"}
+    return user_response
+
+# User management routes
+@app.get("/users", response_model=List[User])
+async def get_users(current_user: dict = Depends(get_current_active_user)):
+    # Only admin users can view all users
+    if current_user["role"] != "Admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view all users")
+    
+    # Return users without hashed_password
+    return [{k: v for k, v in user.items() if k != "hashed_password"} for user in mock_users]
+
+@app.get("/users/me", response_model=User)
+async def get_current_user_profile(current_user: dict = Depends(get_current_active_user)):
+    return {k: v for k, v in current_user.items() if k != "hashed_password"}
+
+@app.get("/users/{user_id}", response_model=User)
+async def get_user_by_id(user_id: str, current_user: dict = Depends(get_current_active_user)):
+    # Check if admin or requesting own profile
+    if current_user["role"] != "Admin" and current_user["id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this user")
+    
+    for user in mock_users:
+        if user["id"] == user_id:
+            return {k: v for k, v in user.items() if k != "hashed_password"}
+    
+    raise HTTPException(status_code=404, detail="User not found")
+
+@app.post("/users", response_model=User, status_code=status.HTTP_201_CREATED)
+async def create_user(user: UserCreate, current_user: dict = Depends(get_current_active_user)):
+    # Only admin users can create new users
+    if current_user["role"] != "Admin":
+        raise HTTPException(status_code=403, detail="Not authorized to create users")
+    
+    # Check if email already exists
+    if get_user(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    new_user = user.dict()
+    new_user["id"] = str(uuid.uuid4())
+    new_user["lastActive"] = datetime.now().isoformat()
+    new_user["hashed_password"] = get_password_hash(user.password)
+    del new_user["password"]  # Remove plain password
+    
+    mock_users.append(new_user)
+    
+    # Return user without hashed_password
+    user_response = {k: v for k, v in new_user.items() if k != "hashed_password"}
+    return user_response
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(user_id: str):
+async def delete_user(user_id: str, current_user: dict = Depends(get_current_active_user)):
+    # Only admin users can delete users
+    if current_user["role"] != "Admin":
+        raise HTTPException(status_code=403, detail="Not authorized to delete users")
+    
     for i, user in enumerate(mock_users):
         if user["id"] == user_id:
             mock_users.pop(i)
             return
+    
     raise HTTPException(status_code=404, detail="User not found")
 
 @app.patch("/users/{user_id}/status", response_model=User)
-def update_user_status(user_id: str):
+async def update_user_status(user_id: str, current_user: dict = Depends(get_current_active_user)):
+    # Only admin users can update user status
+    if current_user["role"] != "Admin":
+        raise HTTPException(status_code=403, detail="Not authorized to update user status")
+    
     for user in mock_users:
         if user["id"] == user_id:
             user["status"] = "Inactive" if user["status"] == "Active" else "Active"
-            return user
+            return {k: v for k, v in user.items() if k != "hashed_password"}
+    
     raise HTTPException(status_code=404, detail="User not found")
+
+# Chat routes
+@app.get("/chat/sessions", response_model=List[ChatSession])
+async def get_chat_sessions(current_user: dict = Depends(get_current_active_user)):
+    user_sessions = [session for session in mock_chat_sessions if session["user_id"] == current_user["id"]]
+    return user_sessions
+
+@app.get("/chat/sessions/{session_id}", response_model=ChatSession)
+async def get_chat_session(session_id: str, current_user: dict = Depends(get_current_active_user)):
+    for session in mock_chat_sessions:
+        if session["id"] == session_id and session["user_id"] == current_user["id"]:
+            return session
+    
+    raise HTTPException(status_code=404, detail="Chat session not found")
+
+@app.post("/chat/sessions", response_model=ChatSession, status_code=status.HTTP_201_CREATED)
+async def create_chat_session(title: str = Body(...), current_user: dict = Depends(get_current_active_user)):
+    new_session = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "title": title,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "messages": []
+    }
+    
+    mock_chat_sessions.append(new_session)
+    return new_session
+
+@app.post("/chat/sessions/{session_id}/messages", response_model=Message)
+async def add_chat_message(
+    session_id: str, 
+    content: str = Body(...), 
+    current_user: dict = Depends(get_current_active_user)
+):
+    # Find the session
+    session = None
+    for s in mock_chat_sessions:
+        if s["id"] == session_id and s["user_id"] == current_user["id"]:
+            session = s
+            break
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    
+    # Add user message
+    user_message = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "content": content,
+        "timestamp": datetime.now().isoformat(),
+        "type": "user"
+    }
+    
+    session["messages"].append(user_message)
+    session["updated_at"] = datetime.now().isoformat()
+    
+    # Simulate bot response
+    bot_message = {
+        "id": str(uuid.uuid4()),
+        "user_id": "system",
+        "content": f"This is a simulated response to: {content}",
+        "timestamp": datetime.now().isoformat(),
+        "type": "bot"
+    }
+    
+    session["messages"].append(bot_message)
+    
+    return user_message
+
+# Credential management routes
+@app.get("/credentials", response_model=List[Credential])
+async def get_credentials(current_user: dict = Depends(get_current_active_user)):
+    user_credentials = [cred for cred in mock_credentials if cred["user_id"] == current_user["id"]]
+    return user_credentials
+
+@app.post("/credentials", response_model=Credential, status_code=status.HTTP_201_CREATED)
+async def add_credential(
+    service: str = Body(...),
+    details: Dict[str, Any] = Body(...),
+    current_user: dict = Depends(get_current_active_user)
+):
+    new_credential = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "service": service,
+        "details": details,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat()
+    }
+    
+    mock_credentials.append(new_credential)
+    return new_credential
+
+@app.delete("/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_credential(credential_id: str, current_user: dict = Depends(get_current_active_user)):
+    for i, cred in enumerate(mock_credentials):
+        if cred["id"] == credential_id and cred["user_id"] == current_user["id"]:
+            mock_credentials.pop(i)
+            return
+    
+    raise HTTPException(status_code=404, detail="Credential not found")
+
+# Admin analytics routes
+@app.get("/admin/analytics")
+async def get_admin_analytics(current_user: dict = Depends(get_current_active_user)):
+    # Only admin users can access analytics
+    if current_user["role"] != "Admin":
+        raise HTTPException(status_code=403, detail="Not authorized to access analytics")
+    
+    return mock_analytics
 
 # Run with: uvicorn main:app --reload
