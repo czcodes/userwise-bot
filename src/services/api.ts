@@ -1,6 +1,8 @@
+
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000'; // FastAPI default port
+// Use the proxy URL instead of direct backend URL
+const API_URL = '/api'; // This will be proxied to http://localhost:8000
 
 // Types
 export interface User {
