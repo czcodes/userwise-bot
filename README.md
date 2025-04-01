@@ -19,6 +19,20 @@ An AI assistant for Airflow, MongoDB, and Kubernetes.
 - Python 3.8+ for the backend
 - npm or yarn
 
+### Running Both Servers Together
+
+You can run both the frontend and backend servers simultaneously using:
+
+```bash
+# Make the script executable first
+chmod +x start-dev.sh
+
+# Run both servers
+./start-dev.sh
+```
+
+This will start the backend at http://localhost:8000 and the frontend at http://localhost:5173
+
 ### Backend Setup
 
 1. Navigate to the API directory:
@@ -67,4 +81,3 @@ The API will be available at http://localhost:8000
 Once the backend is running, you can access the API documentation at:
 - http://localhost:8000/docs - Swagger UI
 - http://localhost:8000/redoc - ReDoc UI
-
