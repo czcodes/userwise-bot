@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import AuthForm from "@/components/auth/AuthForm";
 import OnboardingFlow from "@/components/auth/OnboardingFlow";
@@ -8,15 +8,33 @@ import ChatInterface from "@/components/chat/ChatInterface";
 import CredentialManager from "@/components/credentials/CredentialManager";
 import AdminPanel from "@/components/admin/AdminPanel";
 import { Toaster } from "@/components/ui/toaster";
+import { initializeAuth, logout } from "@/services/api";
 
 // Auth states
 type AuthState = "unauthenticated" | "onboarding" | "authenticated";
 
 const Index = () => {
   const [authState, setAuthState] = useState<AuthState>("unauthenticated");
-  const [userName, setUserName] = useState("John Doe");
+  const [userName, setUserName] = useState("");
+
+  // Check for existing authentication on component mount
+  useEffect(() => {
+    if (initializeAuth()) {
+      // Get user's name from localStorage
+      const storedName = localStorage.getItem('userName');
+      if (storedName) {
+        setUserName(storedName);
+        setAuthState("authenticated");
+      }
+    }
+  }, []);
 
   const handleLoginSuccess = () => {
+    // Get user's name from localStorage after login
+    const storedName = localStorage.getItem('userName');
+    if (storedName) {
+      setUserName(storedName);
+    }
     setAuthState("onboarding");
   };
 
@@ -25,6 +43,7 @@ const Index = () => {
   };
 
   const handleLogout = () => {
+    logout();
     setAuthState("unauthenticated");
   };
 

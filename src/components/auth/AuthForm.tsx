@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { login, register } from "@/services/api";
 
 type AuthMode = "login" | "register";
 
@@ -27,16 +28,27 @@ const AuthForm = ({ onSuccess }: { onSuccess: () => void }) => {
     setIsLoading(true);
 
     try {
-      // In a real application, this would be an actual API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
-      // Simulate success
-      toast({
-        title: mode === "login" ? "Welcome back!" : "Account created!",
-        description: mode === "login" 
-          ? "You have successfully logged in." 
-          : "Your account has been created successfully.",
-      });
+      if (mode === "login") {
+        await login({ email, password });
+        toast({
+          title: "Welcome back!",
+          description: "You have successfully logged in.",
+        });
+      } else {
+        await register({
+          name,
+          email,
+          password,
+          role: "User",
+          status: "Active"
+        });
+        // After successful registration, login the user
+        await login({ email, password });
+        toast({
+          title: "Account created!",
+          description: "Your account has been created successfully.",
+        });
+      }
       
       // Call onSuccess to navigate to the next screen
       onSuccess();
@@ -44,7 +56,7 @@ const AuthForm = ({ onSuccess }: { onSuccess: () => void }) => {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Something went wrong. Please try again.",
+        description: error instanceof Error ? error.message : "Something went wrong. Please try again.",
       });
     } finally {
       setIsLoading(false);

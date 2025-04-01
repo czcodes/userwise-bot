@@ -4,13 +4,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { useState, useEffect } from "react";
-import { Pencil, Trash2, Check, X, Loader2 } from "lucide-react";
+import { Pencil, Trash2, Check, X, Loader2, UserPlus } from "lucide-react";
 import { fetchUsers, deleteUser, toggleUserStatus, User } from "@/services/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { UserForm } from "./UserForm";
 
 export function UserList() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showUserForm, setShowUserForm] = useState(false);
   
   // Fetch users using React Query
   const { data: users = [], isLoading, error } = useQuery({
@@ -90,7 +92,13 @@ export function UserList() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-medium">User Management</h3>
-        <Button variant="outline" size="sm">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => setShowUserForm(true)}
+          className="flex items-center gap-1"
+        >
+          <UserPlus className="h-4 w-4" />
           Add User
         </Button>
       </div>
@@ -158,6 +166,12 @@ export function UserList() {
           ))}
         </TableBody>
       </Table>
+      
+      {/* User form modal */}
+      <UserForm 
+        open={showUserForm} 
+        onClose={() => setShowUserForm(false)} 
+      />
     </div>
   );
 }
