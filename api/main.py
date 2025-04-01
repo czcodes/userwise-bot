@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, HTTPException, Depends, status, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -28,6 +27,7 @@ app.add_middleware(
 )
 
 # Simple token generation
+# Change the tokenUrl to match what the frontend expects
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Models

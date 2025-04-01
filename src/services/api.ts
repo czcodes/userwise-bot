@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 
 // Use the proxy URL instead of direct backend URL
@@ -103,6 +102,8 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
     formData.append('username', credentials.email);
     formData.append('password', credentials.password);
 
+    // The token endpoint in FastAPI doesn't have a leading slash, but our proxy expects it
+    // Using the full URL to make it clearer
     const response = await axios.post(`${API_URL}/token`, formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
