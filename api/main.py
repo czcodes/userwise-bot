@@ -5,14 +5,14 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-from passlib.context import CryptContext
-from jose import JWTError, jwt
 import uuid
 import json
+import hashlib
+import base64
+import secrets
 
 # Security configuration
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"  # Change in production
-ALGORITHM = "HS256"
+SECRET_KEY = secrets.token_hex(32)  # Generate a random secret key
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Initialize FastAPI app
@@ -27,8 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Simple token generation
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Models
@@ -60,7 +59,7 @@ class User(UserBase):
         from_attributes = True
 
 class UserInDB(User):
-    hashed_password: str
+    password_hash: str
 
 # Chat models
 class Message(BaseModel):
@@ -87,6 +86,13 @@ class Credential(BaseModel):
     created_at: str
     updated_at: str
 
+# Simple password hashing
+def hash_password(password: str) -> str:
+    return hashlib.sha256((password + SECRET_KEY).encode()).hexdigest()
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return hash_password(plain_password) == hashed_password
+
 # Mock database
 mock_users = [
     {
@@ -96,7 +102,7 @@ mock_users = [
         "role": "Admin",
         "status": "Active",
         "lastActive": "2023-07-15T14:30:00",
-        "hashed_password": pwd_context.hash("password123")
+        "password_hash": hash_password("password123")
     },
     {
         "id": "2",
@@ -105,7 +111,7 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-15T10:15:00",
-        "hashed_password": pwd_context.hash("password456")
+        "password_hash": hash_password("password456")
     },
     {
         "id": "3",
@@ -114,7 +120,7 @@ mock_users = [
         "role": "User",
         "status": "Inactive",
         "lastActive": "2023-07-10T09:45:00",
-        "hashed_password": pwd_context.hash("password789")
+        "password_hash": hash_password("password789")
     },
     {
         "id": "4",
@@ -123,7 +129,7 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-14T16:20:00",
-        "hashed_password": pwd_context.hash("passwordabc")
+        "password_hash": hash_password("passwordabc")
     },
     {
         "id": "5",
@@ -132,7 +138,7 @@ mock_users = [
         "role": "User",
         "status": "Active",
         "lastActive": "2023-07-15T11:05:00",
-        "hashed_password": pwd_context.hash("passworddef")
+        "password_hash": hash_password("passworddef")
     },
 ]
 
@@ -236,13 +242,48 @@ mock_analytics = {
     }
 }
 
+# Simple token generation and validation
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode = data.copy()
+    to_encode.update({"exp": int(expire.timestamp())})
+    
+    # Convert token data to string and encode
+    token_data = json.dumps(to_encode).encode()
+    token = base64.urlsafe_b64encode(token_data).decode()
+    return token
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        # Decode the token
+        token_bytes = base64.urlsafe_b64decode(token)
+        payload = json.loads(token_bytes.decode())
+        
+        # Check token expiration
+        if "exp" not in payload or datetime.utcnow().timestamp() > payload["exp"]:
+            raise credentials_exception
+            
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except Exception:
+        raise credentials_exception
+        
+    user = get_user(username)
+    if user is None:
+        raise credentials_exception
+        
+    # Update lastActive timestamp
+    user["lastActive"] = datetime.now().isoformat()
+    return user
+
 # Security helper functions
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
 def get_user(email: str):
     for user in mock_users:
         if user["email"] == email:
@@ -253,39 +294,8 @@ def authenticate_user(email: str, password: str):
     user = get_user(email)
     if not user:
         return False
-    if not verify_password(password, user["hashed_password"]):
+    if not verify_password(password, user["password_hash"]):
         return False
-    return user
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except JWTError:
-        raise credentials_exception
-    user = get_user(token_data.username)
-    if user is None:
-        raise credentials_exception
-    # Update lastActive timestamp
-    user["lastActive"] = datetime.now().isoformat()
     return user
 
 async def get_current_active_user(current_user: dict = Depends(get_current_user)):
@@ -334,13 +344,13 @@ async def register_user(user: UserCreate):
     new_user = user.dict()
     new_user["id"] = str(uuid.uuid4())
     new_user["lastActive"] = datetime.now().isoformat()
-    new_user["hashed_password"] = get_password_hash(user.password)
+    new_user["password_hash"] = hash_password(user.password)
     del new_user["password"]  # Remove plain password
     
     mock_users.append(new_user)
     
-    # Return user without hashed_password
-    user_response = {k: v for k, v in new_user.items() if k != "hashed_password"}
+    # Return user without password_hash
+    user_response = {k: v for k, v in new_user.items() if k != "password_hash"}
     return user_response
 
 # User management routes
@@ -350,12 +360,12 @@ async def get_users(current_user: dict = Depends(get_current_active_user)):
     if current_user["role"] != "Admin":
         raise HTTPException(status_code=403, detail="Not authorized to view all users")
     
-    # Return users without hashed_password
-    return [{k: v for k, v in user.items() if k != "hashed_password"} for user in mock_users]
+    # Return users without password_hash
+    return [{k: v for k, v in user.items() if k != "password_hash"} for user in mock_users]
 
 @app.get("/users/me", response_model=User)
 async def get_current_user_profile(current_user: dict = Depends(get_current_active_user)):
-    return {k: v for k, v in current_user.items() if k != "hashed_password"}
+    return {k: v for k, v in current_user.items() if k != "password_hash"}
 
 @app.get("/users/{user_id}", response_model=User)
 async def get_user_by_id(user_id: str, current_user: dict = Depends(get_current_active_user)):
@@ -365,7 +375,7 @@ async def get_user_by_id(user_id: str, current_user: dict = Depends(get_current_
     
     for user in mock_users:
         if user["id"] == user_id:
-            return {k: v for k, v in user.items() if k != "hashed_password"}
+            return {k: v for k, v in user.items() if k != "password_hash"}
     
     raise HTTPException(status_code=404, detail="User not found")
 
@@ -386,13 +396,13 @@ async def create_user(user: UserCreate, current_user: dict = Depends(get_current
     new_user = user.dict()
     new_user["id"] = str(uuid.uuid4())
     new_user["lastActive"] = datetime.now().isoformat()
-    new_user["hashed_password"] = get_password_hash(user.password)
+    new_user["password_hash"] = hash_password(user.password)
     del new_user["password"]  # Remove plain password
     
     mock_users.append(new_user)
     
-    # Return user without hashed_password
-    user_response = {k: v for k, v in new_user.items() if k != "hashed_password"}
+    # Return user without password_hash
+    user_response = {k: v for k, v in new_user.items() if k != "password_hash"}
     return user_response
 
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -417,7 +427,7 @@ async def update_user_status(user_id: str, current_user: dict = Depends(get_curr
     for user in mock_users:
         if user["id"] == user_id:
             user["status"] = "Inactive" if user["status"] == "Active" else "Active"
-            return {k: v for k, v in user.items() if k != "hashed_password"}
+            return {k: v for k, v in user.items() if k != "password_hash"}
     
     raise HTTPException(status_code=404, detail="User not found")
 
