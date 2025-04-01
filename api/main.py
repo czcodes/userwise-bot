@@ -475,6 +475,10 @@ async def add_chat_message(
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     
+    # Log user input to console for debugging and processing
+    print(f"\n[USER INPUT] User {current_user['name']} ({current_user['id']}) sent: {content}")
+    
+    # Process the user message based on content
     # Add user message
     user_message = {
         "id": str(uuid.uuid4()),
@@ -487,11 +491,14 @@ async def add_chat_message(
     session["messages"].append(user_message)
     session["updated_at"] = datetime.now().isoformat()
     
-    # Simulate bot response
+    # Generate bot response based on user input
+    bot_response = process_user_input(content)
+    
+    # Add bot response
     bot_message = {
         "id": str(uuid.uuid4()),
         "user_id": "system",
-        "content": f"This is a simulated response to: {content}",
+        "content": bot_response,
         "timestamp": datetime.now().isoformat(),
         "type": "bot"
     }
@@ -499,6 +506,41 @@ async def add_chat_message(
     session["messages"].append(bot_message)
     
     return user_message
+
+def process_user_input(user_input: str) -> str:
+    """Process user input and generate an appropriate response"""
+    # Convert to lowercase for easier matching
+    input_lower = user_input.lower()
+    
+    # Log the processing
+    print(f"[PROCESSING] Processing user input: '{user_input}'")
+    
+    # Simple keyword-based responses
+    if any(word in input_lower for word in ["hello", "hi", "hey", "greetings"]):
+        return "Hello! I'm your DevOps assistant. How can I help you today?"
+    
+    elif any(word in input_lower for word in ["kubernetes", "k8s", "cluster"]):
+        return "I see you're asking about Kubernetes. I can help with cluster management, pod deployment, and troubleshooting. What specific aspect are you interested in?"
+    
+    elif any(word in input_lower for word in ["docker", "container", "image"]):
+        return "Docker containers are a core part of modern DevOps. I can help with container creation, management, and optimization. What are you trying to accomplish?"
+    
+    elif any(word in input_lower for word in ["mongodb", "database", "nosql"]):
+        return "MongoDB is a popular NoSQL database. I can help with connection issues, query optimization, and data modeling. What's your specific question?"
+    
+    elif any(word in input_lower for word in ["ci", "cd", "pipeline", "jenkins", "github actions"]):
+        return "Continuous Integration and Deployment pipelines are essential for modern development. Would you like help setting up a pipeline or troubleshooting an existing one?"
+    
+    elif any(word in input_lower for word in ["error", "issue", "problem", "bug", "fix"]):
+        return "I'm sorry to hear you're experiencing an issue. Could you provide more details about the error message or symptoms you're seeing?"
+    
+    elif any(word in input_lower for word in ["thanks", "thank you", "thx"]):
+        return "You're welcome! Is there anything else I can help you with?"
+    
+    # If no specific keywords are matched, provide a general response
+    else:
+        print(f"[NO MATCH] No specific pattern matched for: '{user_input}'")
+        return f"I've received your message about '{user_input}'. Can you provide more details so I can assist you better?"
 
 # Credential management routes
 @app.get("/credentials", response_model=List[Credential])

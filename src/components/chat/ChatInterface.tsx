@@ -6,6 +6,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArrowUp, Bot, Paperclip, User } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { sendChatMessage } from "@/services/api";
 
 type Message = {
   id: string;
@@ -25,6 +26,7 @@ const ChatInterface = () => {
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [sessionId, setSessionId] = useState("1"); // Default session ID
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -50,28 +52,29 @@ const ChatInterface = () => {
     setInput("");
     setIsTyping(true);
     
-    // Simulate bot response after a delay
-    setTimeout(() => {
-      const botResponses = [
-        "I'm checking your Airflow instance now...",
-        "Your Kubernetes pods are running normally.",
-        "I've found the MongoDB collection you mentioned. It contains 342 documents.",
-        "According to your logs, the issue might be related to a recent configuration change.",
-        "The deployment was successful. All services are up and running.",
-      ];
+    try {
+      // Send message to backend API
+      const response = await sendChatMessage(sessionId, input);
       
-      const randomResponse = botResponses[Math.floor(Math.random() * botResponses.length)];
-      
+      // Add bot response from API
       const botMessage: Message = {
-        id: Date.now().toString(),
-        content: randomResponse,
+        id: response.id || Date.now().toString() + "-response",
+        content: response.content,
         sender: "bot",
         timestamp: new Date(),
       };
       
       setMessages((prev) => [...prev, botMessage]);
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      toast({
+        title: "Error",
+        description: "Failed to send message. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
